@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+.env
+
+data/pdfs/
+data/qas/
+data/cache/
+
+results/
+indexes/
+.uv_cache/
+*.egg-info/

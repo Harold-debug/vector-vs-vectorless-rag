@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vvvrag"
+version = "0.1.0"
+description = "Vector vs Vectorless RAG benchmark"
+requires-python = ">=3.10"
+dependencies = [
+  "python-dotenv>=1.0.1",
+  "boto3>=1.34.0",
+  "langchain>=0.3.0",
+  "langchain-core>=0.3.0",
+  "langchain-aws>=0.2.0",
+  "langchain-community>=0.3.0",
+  "langgraph>=0.2.0",
+  "faiss-cpu>=1.8.0",
+  "pypdf>=5.0.0",
+  "numpy>=1.26.0",
+  "typer>=0.12.3",
+  "rich>=13.7.1",
+  "gradio>=5.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vvvrag"]
