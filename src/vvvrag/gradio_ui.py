@@ -159,7 +159,7 @@ def run_benchmark(question: str, expert_rules: str, k: int, state: dict | None):
 # ---------------------------------------------------------------------------
 
 def build_demo() -> gr.Blocks:
-    with gr.Blocks(title="Vector vs Vectorless RAG", theme=THEME, css=CSS) as demo:
+    with gr.Blocks(title="Vector vs Vectorless RAG") as demo:
         gr.Markdown("# Vector vs Vectorless RAG\n**AWS Bedrock** · Upload a PDF, then test each approach or benchmark both.")
         state = gr.State(None)
 
@@ -228,4 +228,10 @@ def build_demo() -> gr.Blocks:
 
 
 def launch_ui(*, server_name="127.0.0.1", server_port=7860, share=False):
-    build_demo().launch(server_name=server_name, server_port=server_port, share=share)
+    build_demo().launch(
+        server_name=server_name,
+        server_port=server_port,
+        share=share,
+        theme=THEME,
+        css=CSS,
+    )

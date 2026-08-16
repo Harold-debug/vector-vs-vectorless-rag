@@ -23,5 +23,11 @@ dependencies = [
   "gradio>=5.0.0",
 ]
 
+[project.scripts]
+vvvrag = "vvvrag.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/vvvrag"]
+
+[tool.uv]
+package = true

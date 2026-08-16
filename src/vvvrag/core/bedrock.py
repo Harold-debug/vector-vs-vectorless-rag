@@ -21,6 +21,7 @@ def get_embeddings(
     model_id: str = DEFAULT_EMBEDDING_MODEL,
     region: str = DEFAULT_REGION,
 ) -> BedrockEmbeddings:
+    # Uses AWS_PROFILE from the environment / .env (SSO). Do not pass static keys.
     client = boto3.client("bedrock-runtime", region_name=region)
     return BedrockEmbeddings(client=client, model_id=model_id, region_name=region)
 

@@ -4,7 +4,7 @@ Side-by-side comparison of **Vector RAG** vs **Vectorless RAG** (PageIndex-style
 
 ## Architecture
 
-### Vector RAG (`vector/`)
+### Vector RAG (`vector/`) 
 
 ```
 PDF → PyPDFLoader → RecursiveCharacterTextSplitter → BedrockEmbeddings → FAISS → retriever → ChatBedrock
@@ -23,32 +23,69 @@ No embeddings, no vector DB. The LLM acts like an expert scanning a Table of Con
 ## Quickstart
 
 ```bash
-uv venv && source .venv/bin/activate && uv sync
+cp .env.example .env   # first time — set AWS region / Bedrock model IDs
+make sync
+make ui
+# http://127.0.0.1:7860
 ```
 
-### AWS credentials
+Or without Make:
 
-Standard AWS credential chain (`~/.aws/credentials`, env vars, or IAM role).
+```bash
+uv sync --no-editable
+uv run --no-editable python run.py ui
+```
+
+Use `run.py` (or `make ui`) instead of `python -m vvvrag`. Editable installs break under Documents/iCloud: the `.pth` gets marked hidden and Python 3.13 skips it → `No module named vvvrag`.
+
+### AWS credentials (SSO)
+
+Do **not** mix static keys (`AWS_ACCESS_KEY_ID` / `SECRET` / `SESSION_TOKEN`) with SSO.
+
+One-time setup in a clean terminal:
+
+```bash
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_BEARER_TOKEN_BEDROCK AWS_PROFILE AWS_DEFAULT_PROFILE
+aws sso logout
+aws configure sso
+```
+
+Suggested answers:
+
+| Prompt | Value |
+|--------|--------|
+| SSO session name | `company-sso` |
+| SSO start URL | `https://socotec.awsapps.com/start/` |
+| SSO region | `eu-west-1` (IAM Identity Center) |
+| Registration scopes | `sso:account:access` |
+| CLI default client Region | `us-west-2` (Bedrock) |
+| CLI output | `json` |
+| Profile name | `company-bedrock` |
+
+Then select the company AWS account + role when prompted.
+
+Daily:
+
+```bash
+aws sso login --profile company-bedrock
+aws sts get-caller-identity --profile company-bedrock
+aws bedrock list-inference-profiles --region us-west-2 --profile company-bedrock
+```
 
 ### `.env`
 
 ```bash
-AWS_REGION=us-east-1
-BEDROCK_CHAT_MODEL_ID=anthropic.claude-3-5-haiku-20241022-v1:0
+AWS_PROFILE=company-bedrock
+AWS_REGION=us-west-2
+BEDROCK_CHAT_MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0
 BEDROCK_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v2:0
-```
-
-### Gradio UI
-
-```bash
-uv run python -m vvvrag ui
-# http://127.0.0.1:7860
+UV_NO_EDITABLE=1
 ```
 
 ### Benchmark
 
 ```bash
-uv run python -m vvvrag bench --pdf data/pdfs/sample.pdf --qas data/qas/sample.jsonl
+make bench ARGS='--pdf data/pdfs/sample.pdf --qas data/qas/sample.jsonl'
 ```
 
 QA file format (`.jsonl`):
@@ -76,3 +113,4 @@ src/vvvrag/
 ├── cli.py             # CLI: bench, ui, version
 └── gradio_ui.py       # Gradio comparison UI
 ```
+
