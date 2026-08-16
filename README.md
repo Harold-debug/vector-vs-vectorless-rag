@@ -38,44 +38,13 @@ uv run --no-editable python run.py ui
 
 Use `run.py` (or `make ui`) instead of `python -m vvvrag`. Editable installs break under Documents/iCloud: the `.pth` gets marked hidden and Python 3.13 skips it → `No module named vvvrag`.
 
-### AWS credentials (SSO)
+### AWS credentials
 
-Do **not** mix static keys (`AWS_ACCESS_KEY_ID` / `SECRET` / `SESSION_TOKEN`) with SSO.
-
-One-time setup in a clean terminal:
-
-```bash
-unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_BEARER_TOKEN_BEDROCK AWS_PROFILE AWS_DEFAULT_PROFILE
-aws sso logout
-aws configure sso
-```
-
-Suggested answers:
-
-| Prompt | Value |
-|--------|--------|
-| SSO session name | `company-sso` |
-| SSO start URL | `https://socotec.awsapps.com/start/` |
-| SSO region | `eu-west-1` (IAM Identity Center) |
-| Registration scopes | `sso:account:access` |
-| CLI default client Region | `us-west-2` (Bedrock) |
-| CLI output | `json` |
-| Profile name | `company-bedrock` |
-
-Then select the company AWS account + role when prompted.
-
-Daily:
-
-```bash
-aws sso login --profile company-bedrock
-aws sts get-caller-identity --profile company-bedrock
-aws bedrock list-inference-profiles --region us-west-2 --profile company-bedrock
-```
+Use the standard AWS credential chain (profile, env vars, or IAM role). Set region and Bedrock model IDs in `.env`.
 
 ### `.env`
 
 ```bash
-AWS_PROFILE=company-bedrock
 AWS_REGION=us-west-2
 BEDROCK_CHAT_MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0
 BEDROCK_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v2:0
