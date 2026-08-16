@@ -1,4 +1,4 @@
-"""Gradio UI: upload a PDF, index both approaches, compare side-by-side."""
+"""Gradio UI: test each RAG approach individually + benchmark both side-by-side."""
 
 from __future__ import annotations
 
@@ -14,17 +14,18 @@ from .vectorless import build_index as vless_build, query as vless_query
 
 THEME = gr.themes.Soft()
 
-HEADER = """
-# Vector vs Vectorless RAG
-**AWS Bedrock** &bull; Upload a PDF, index it with both approaches, then compare answers side-by-side.
-"""
-
 CSS = """
-.vec-header  { background: #1a5276; color: white; padding: 12px 16px; border-radius: 8px 8px 0 0; margin-bottom: 0; }
-.vless-header { background: #7d3c98; color: white; padding: 12px 16px; border-radius: 8px 8px 0 0; margin-bottom: 0; }
-.result-box  { border: 1px solid #333; border-radius: 0 0 8px 8px; padding: 16px; min-height: 200px; }
+.vec-accent   { border-left: 4px solid #1a5276 !important; }
+.vless-accent { border-left: 4px solid #7d3c98 !important; }
+.bench-vec    { background: #1a5276; color: white; padding: 10px 14px; border-radius: 8px 8px 0 0; }
+.bench-vless  { background: #7d3c98; color: white; padding: 10px 14px; border-radius: 8px 8px 0 0; }
+.result-box   { border: 1px solid #444; border-radius: 0 0 8px 8px; padding: 16px; min-height: 180px; }
 """
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _pdf_path(f: Any) -> str | None:
     if not f:
@@ -32,36 +33,102 @@ def _pdf_path(f: Any) -> str | None:
     return f if isinstance(f, str) else getattr(f, "name", str(f))
 
 
+def _fmt_vec(vr: dict, dt: int) -> str:
+    src = "\n".join(f"- p.{s['page']}: {s['text'][:120]}..." for s in vr["sources"][:6])
+    return (
+        f"**{dt / 1000:.1f}s**\n\n"
+        f"### Answer\n{vr['answer']}\n\n"
+        f"### Retrieved chunks\n{src or '_(none)_'}"
+    )
+
+
+def _fmt_vless(vl: dict, dt: int) -> str:
+    nds = "\n".join(f"- {n['title']} ({n['pages']})" for n in vl["nodes"][:8])
+    thinking = vl.get("route", {}).get("thinking", "")
+    md = (
+        f"**{dt / 1000:.1f}s**\n\n"
+        f"### Answer\n{vl['answer']}\n\n"
+        f"### Routed nodes\n{nds or '_(none)_'}"
+    )
+    if thinking:
+        md += f"\n\n### Routing reasoning\n> {thinking}"
+    return md
+
+
+# ---------------------------------------------------------------------------
+# Index
+# ---------------------------------------------------------------------------
+
 def index_document(file_obj: Any):
     path = _pdf_path(file_obj)
     if not path or not Path(path).is_file():
         yield "Upload a PDF first.", None
         return
 
-    yield "**Indexing...** Building vector store (embeddings + FAISS) and document tree...", None
-
+    yield "**Indexing...** Building FAISS vector store and document tree...", None
     try:
         t0 = now_ms()
         embeddings = get_embeddings()
         llm = get_chat_model()
         store = vec_build(path, embeddings)
         tree = vless_build(path)
-        ms = now_ms() - t0
-        state = {"store": store, "tree": tree, "llm": llm, "embeddings": embeddings}
+        dt = now_ms() - t0
+        state = {"store": store, "tree": tree, "llm": llm, "pdf": path}
         md = (
-            f"**Indexed in {ms / 1000:.1f}s**\n\n"
-            f"| | Detail |\n|---|---|\n"
-            f"| **Vector** | {store.index.ntotal} chunks in FAISS |\n"
-            f"| **Vectorless** | {len(tree)} top-level tree node(s) |"
+            f"**Indexed in {dt / 1000:.1f}s**\n\n"
+            f"| Approach | Detail |\n|---|---|\n"
+            f"| Vector | {store.index.ntotal} chunks in FAISS |\n"
+            f"| Vectorless | {len(tree)} top-level tree node(s) |"
         )
         yield md, state
     except Exception as e:
         yield f"**Error:** `{e}`\n```\n{traceback.format_exc()}\n```", None
 
 
-def compare(question: str, expert_rules: str, state: dict | None, k: int):
+# ---------------------------------------------------------------------------
+# Single-approach handlers
+# ---------------------------------------------------------------------------
+
+def run_vector(question: str, k: int, state: dict | None):
     q = (question or "").strip()
-    placeholder = "*Waiting...*"
+    if not q:
+        yield "*Enter a question.*"
+        return
+    if not state:
+        yield "*Index a PDF first (use the section above).*"
+        return
+    yield "**Running vector RAG...**"
+    try:
+        t = now_ms()
+        vr = vec_query(q, state["store"], state["llm"], k=max(1, int(k)))
+        yield _fmt_vec(vr, now_ms() - t)
+    except Exception as e:
+        yield f"**Error:** `{e}`\n```\n{traceback.format_exc()}\n```"
+
+
+def run_vectorless(question: str, expert_rules: str, k: int, state: dict | None):
+    q = (question or "").strip()
+    if not q:
+        yield "*Enter a question.*"
+        return
+    if not state:
+        yield "*Index a PDF first (use the section above).*"
+        return
+    yield "**Running vectorless RAG (LLM tree routing)...**"
+    try:
+        t = now_ms()
+        vl = vless_query(q, state["tree"], state["llm"], expert_rules=expert_rules.strip() or None, k=max(3, int(k)))
+        yield _fmt_vless(vl, now_ms() - t)
+    except Exception as e:
+        yield f"**Error:** `{e}`\n```\n{traceback.format_exc()}\n```"
+
+
+# ---------------------------------------------------------------------------
+# Benchmark (both side-by-side)
+# ---------------------------------------------------------------------------
+
+def run_benchmark(question: str, expert_rules: str, k: int, state: dict | None):
+    q = (question or "").strip()
     if not q:
         yield "*Enter a question.*", "*Enter a question.*"
         return
@@ -69,34 +136,17 @@ def compare(question: str, expert_rules: str, state: dict | None, k: int):
         yield "*Index a PDF first.*", "*Index a PDF first.*"
         return
 
-    yield "**Running vector RAG...**", "**Waiting for vector RAG to finish...**"
-
+    yield "**Running vector RAG...**", "**Waiting...**"
     try:
         t1 = now_ms()
         vr = vec_query(q, state["store"], state["llm"], k=max(1, int(k)))
-        dt1 = now_ms() - t1
+        left = _fmt_vec(vr, now_ms() - t1)
 
-        src = "\n".join(f"- p.{s['page']}: {s['text'][:120]}..." for s in vr["sources"][:6])
-        left = (
-            f"**{dt1 / 1000:.1f}s**\n\n"
-            f"### Answer\n{vr['answer']}\n\n"
-            f"### Retrieved chunks\n{src or '_(none)_'}"
-        )
-        yield left, "**Running vectorless RAG (LLM tree routing)...**"
+        yield left, "**Running vectorless RAG...**"
 
         t2 = now_ms()
         vl = vless_query(q, state["tree"], state["llm"], expert_rules=expert_rules.strip() or None, k=max(3, int(k)))
-        dt2 = now_ms() - t2
-
-        nds = "\n".join(f"- {n['title']} ({n['pages']})" for n in vl["nodes"][:8])
-        thinking = vl.get("route", {}).get("thinking", "")
-        right = (
-            f"**{dt2 / 1000:.1f}s**\n\n"
-            f"### Answer\n{vl['answer']}\n\n"
-            f"### Routed nodes\n{nds or '_(none)_'}"
-        )
-        if thinking:
-            right += f"\n\n### LLM routing reasoning\n> {thinking}"
+        right = _fmt_vless(vl, now_ms() - t2)
 
         yield left, right
     except Exception as e:
@@ -104,34 +154,75 @@ def compare(question: str, expert_rules: str, state: dict | None, k: int):
         yield err, err
 
 
+# ---------------------------------------------------------------------------
+# Layout
+# ---------------------------------------------------------------------------
+
 def build_demo() -> gr.Blocks:
     with gr.Blocks(title="Vector vs Vectorless RAG", theme=THEME, css=CSS) as demo:
-        gr.Markdown(HEADER)
+        gr.Markdown("# Vector vs Vectorless RAG\n**AWS Bedrock** · Upload a PDF, then test each approach or benchmark both.")
         state = gr.State(None)
 
+        # ---- Shared: PDF upload + index ----
         with gr.Group():
+            gr.Markdown("### 1. Load & index a PDF")
             with gr.Row():
                 pdf_in = gr.File(label="PDF document", file_types=[".pdf"], scale=3)
                 index_btn = gr.Button("Index PDF", variant="primary", scale=1, size="lg")
             status = gr.Markdown("*No document indexed yet.*")
 
-        with gr.Group():
-            with gr.Row():
-                question = gr.Textbox(label="Question", lines=2, placeholder="Ask something about the document...", scale=4)
-                k = gr.Slider(1, 15, value=5, step=1, label="Top-k", scale=1)
-            expert = gr.Textbox(label="Expert rules (vectorless only, optional)", lines=1, placeholder="e.g. Focus on financial data...")
-            run_btn = gr.Button("Compare", variant="primary", size="lg")
+        # ---- Tabs ----
+        with gr.Tabs():
+            # -- Tab 1: Vector RAG --
+            with gr.Tab("Vector RAG"):
+                gr.Markdown(
+                    "### 2a. Vector RAG\n"
+                    "`PyPDFLoader → RecursiveCharacterTextSplitter → BedrockEmbeddings → FAISS → ChatBedrock`"
+                )
+                with gr.Row():
+                    vec_q = gr.Textbox(label="Question", lines=2, placeholder="Ask something...", scale=4)
+                    vec_k = gr.Slider(1, 15, value=5, step=1, label="Top-k", scale=1)
+                vec_btn = gr.Button("Run Vector RAG", variant="primary")
+                vec_out = gr.Markdown("*Results will appear here.*", elem_classes=["vec-accent"])
 
-        with gr.Row(equal_height=True):
-            with gr.Column():
-                gr.Markdown("### Vector RAG\n`PyPDFLoader → Splitter → FAISS → Bedrock`", elem_classes=["vec-header"])
-                out_vec = gr.Markdown("*Results will appear here.*", elem_classes=["result-box"])
-            with gr.Column():
-                gr.Markdown("### Vectorless RAG\n`PDF → Tree Index → LLM Routing → Bedrock`", elem_classes=["vless-header"])
-                out_vless = gr.Markdown("*Results will appear here.*", elem_classes=["result-box"])
+            # -- Tab 2: Vectorless RAG --
+            with gr.Tab("Vectorless RAG"):
+                gr.Markdown(
+                    "### 2b. Vectorless RAG (PageIndex-style)\n"
+                    "`PyPDFLoader → Tree Index → LLM Tree Routing → ChatBedrock`\n\n"
+                    "No embeddings, no vector DB. The LLM reasons over the document structure."
+                )
+                with gr.Row():
+                    vless_q = gr.Textbox(label="Question", lines=2, placeholder="Ask something...", scale=4)
+                    vless_k = gr.Slider(1, 15, value=5, step=1, label="Top-k nodes", scale=1)
+                vless_expert = gr.Textbox(label="Expert rules (optional)", lines=1, placeholder="e.g. Focus on financial data...")
+                vless_btn = gr.Button("Run Vectorless RAG", variant="primary")
+                vless_out = gr.Markdown("*Results will appear here.*", elem_classes=["vless-accent"])
 
+            # -- Tab 3: Benchmark --
+            with gr.Tab("Benchmark"):
+                gr.Markdown(
+                    "### 3. Benchmark — side-by-side\n"
+                    "Same question, same PDF. Compare speed, answer quality, and retrieval strategy."
+                )
+                with gr.Row():
+                    bench_q = gr.Textbox(label="Question", lines=2, placeholder="Ask something...", scale=4)
+                    bench_k = gr.Slider(1, 15, value=5, step=1, label="Top-k", scale=1)
+                bench_expert = gr.Textbox(label="Expert rules (vectorless only)", lines=1, placeholder="Optional...")
+                bench_btn = gr.Button("Compare both", variant="primary", size="lg")
+                with gr.Row(equal_height=True):
+                    with gr.Column():
+                        gr.Markdown("### Vector RAG", elem_classes=["bench-vec"])
+                        bench_vec_out = gr.Markdown("*Waiting...*", elem_classes=["result-box"])
+                    with gr.Column():
+                        gr.Markdown("### Vectorless RAG", elem_classes=["bench-vless"])
+                        bench_vless_out = gr.Markdown("*Waiting...*", elem_classes=["result-box"])
+
+        # ---- Events ----
         index_btn.click(index_document, [pdf_in], [status, state])
-        run_btn.click(compare, [question, expert, state, k], [out_vec, out_vless])
+        vec_btn.click(run_vector, [vec_q, vec_k, state], [vec_out])
+        vless_btn.click(run_vectorless, [vless_q, vless_expert, vless_k, state], [vless_out])
+        bench_btn.click(run_benchmark, [bench_q, bench_expert, bench_k, state], [bench_vec_out, bench_vless_out])
 
     return demo
 
